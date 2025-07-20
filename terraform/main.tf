@@ -341,6 +341,18 @@ module "ecs_log_group" {
   retention_in_days = 30
 }
 
+module "lambda_log_group" {
+  source            = "./modules/cloudwatch/cloudwatch-log-group"
+  log_group_name    = "/lambda/nodeapp"
+  retention_in_days = 30
+}
+
+module "ec2_log_group" {
+  source            = "./modules/cloudwatch/cloudwatch-log-group"
+  log_group_name    = "/ec2/nodeapp"
+  retention_in_days = 30
+}
+
 data "aws_iam_policy_document" "s3_put_object_policy_document" {
   statement {
     effect    = "Allow"
@@ -725,4 +737,31 @@ resource "aws_kinesis_firehose_delivery_stream" "opensearch_stream" {
     s3_backup_mode = "AllDocuments"
   }
   depends_on = [module.opensearch]
+}
+
+resource "aws_cloudwatch_log_subscription_filter" "lambda_log_subscription" {
+  name            = "lambda-log-subscription"
+  log_group_name  = module.lambda_log_group.name
+  filter_pattern  = ""
+  destination_arn = module.kinesis_stream.arn
+  role_arn        = aws_iam_role.cloudwatch_to_kinesis.arn
+  distribution    = "ByLogStream"
+}
+
+resource "aws_cloudwatch_log_subscription_filter" "ecs_log_subscription" {
+  name            = "ecs-log-subscription"
+  log_group_name  = module.ecs_log_group.name
+  filter_pattern  = ""
+  destination_arn = module.kinesis_stream.arn
+  role_arn        = aws_iam_role.cloudwatch_to_kinesis.arn
+  distribution    = "ByLogStream"
+}
+
+resource "aws_cloudwatch_log_subscription_filter" "ec2_log_subscription" {
+  name            = "ec2-log-subscription"
+  log_group_name  = module.ec2_log_group.name
+  filter_pattern  = ""
+  destination_arn = module.kinesis_stream.arn
+  role_arn        = aws_iam_role.cloudwatch_to_kinesis.arn
+  distribution    = "ByLogStream"
 }
