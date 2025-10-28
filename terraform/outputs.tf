@@ -6,6 +6,6 @@ output "ecs_lb" {
   value = module.ecs_lb.lb_dns_name
 }
 
-output "opensearch_arn" {
-  value = module.opensearch.domain_arn
-}
+# output "opensearch_arn" {
+#   value = module.opensearch.domain_arn
+# }

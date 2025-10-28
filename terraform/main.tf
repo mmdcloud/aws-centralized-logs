@@ -1,4 +1,6 @@
+# -----------------------------------------------------------------------------------------
 # Registering vault provider
+# -----------------------------------------------------------------------------------------
 data "vault_generic_secret" "opensearch" {
   path = "secret/opensearch"
 }
@@ -7,186 +9,146 @@ resource "random_id" "random" {
   byte_length = 8
 }
 
-# VPC Configuration
+# -----------------------------------------------------------------------------------------
+# Cloudwatch log groups
+# -----------------------------------------------------------------------------------------
+module "ecs_log_group" {
+  source            = "./modules/cloudwatch/cloudwatch-log-group"
+  log_group_name    = "/ecs/nodeapp"
+  retention_in_days = 30
+}
+
+module "lambda_log_group" {
+  source            = "./modules/cloudwatch/cloudwatch-log-group"
+  log_group_name    = "/lambda/nodeapp"
+  retention_in_days = 30
+}
+
+module "ec2_log_group" {
+  source            = "./modules/cloudwatch/cloudwatch-log-group"
+  log_group_name    = "/ec2/nodeapp"
+  retention_in_days = 30
+}
+
+# -----------------------------------------------------------------------------------------
+# VPC configuration
+# -----------------------------------------------------------------------------------------
 module "vpc" {
-  source                = "./modules/vpc/vpc"
-  vpc_name              = "vpc"
-  vpc_cidr_block        = "10.0.0.0/16"
-  enable_dns_hostnames  = true
-  enable_dns_support    = true
-  internet_gateway_name = "vpc_igw"
+  source = "./modules/vpc"
+  vpc_name = "vpc"
+  vpc_cidr = "10.0.0.0/16"
+  azs             = var.azs
+  public_subnets  = var.public_subnets
+  private_subnets = var.private_subnets
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  create_igw = true
+  map_public_ip_on_launch = true
+  enable_nat_gateway     = false
+  single_nat_gateway     = false
+  one_nat_gateway_per_az = false
+  tags = {
+    Project     = "nodeapp"
+  }
 }
 
 # Security Group
-module "ecs_lb_sg" {
-  source = "./modules/vpc/security_groups"
-  vpc_id = module.vpc.vpc_id
-  name   = "ecs_lb_sg"
-  ingress = [
-    {
-      from_port       = 80
-      to_port         = 80
-      protocol        = "tcp"
-      self            = "false"
-      cidr_blocks     = ["0.0.0.0/0"]
-      security_groups = []
-      description     = "any"
-    }
-  ]
-  egress = [
-    {
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  ]
+resource "aws_security_group" "ecs_lb_sg" {
+  name        = "ecs-lb-sg"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    description = "HTTP traffic"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "ecs-lb-sg"
+  }
 }
 
-module "ecs_sg" {
-  source = "./modules/vpc/security_groups"
-  vpc_id = module.vpc.vpc_id
-  name   = "ecs_lb_sg"
-  ingress = [
-    {
-      from_port       = 3000
-      to_port         = 3000
-      protocol        = "tcp"
-      self            = "false"
-      cidr_blocks     = ["0.0.0.0/0"]
-      security_groups = []
-      description     = "any"
-    }
-  ]
-  egress = [
-    {
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  ]
+resource "aws_security_group" "ecs_sg" {
+  name        = "ecs-sg"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "ecs-sg"
+  }
 }
 
-module "asg_lb_sg" {
-  source = "./modules/vpc/security_groups"
-  vpc_id = module.vpc.vpc_id
-  name   = "asg-lb-sg"
-  ingress = [
-    {
-      from_port       = 80
-      to_port         = 80
-      protocol        = "tcp"
-      self            = "false"
-      cidr_blocks     = ["0.0.0.0/0"]
-      security_groups = []
-      description     = "any"
-    }
-  ]
-  egress = [
-    {
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  ]
+resource "aws_security_group" "asg_lb_sg" {
+  name        = "asg-lb-sg"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "asg-lb-sg"
+  }
 }
 
-module "asg_sg" {
-  source = "./modules/vpc/security_groups"
-  vpc_id = module.vpc.vpc_id
-  name   = "asg-sg"
-  ingress = [
-    {
-      from_port       = 3000
-      to_port         = 3000
-      protocol        = "tcp"
-      self            = "false"
-      cidr_blocks     = ["0.0.0.0/0"]
-      security_groups = []
-      description     = "any"
-    }
-  ]
-  egress = [
-    {
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  ]
+resource "aws_security_group" "asg_sg" {
+  name        = "asg-sg"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "asg-sg"
+  }
 }
 
-# Public Subnets
-module "public_subnets" {
-  source = "./modules/vpc/subnets"
-  name   = "public-subnet"
-  subnets = [
-    {
-      subnet = "10.0.1.0/24"
-      az     = "us-east-1a"
-    },
-    {
-      subnet = "10.0.2.0/24"
-      az     = "us-east-1b"
-    },
-    {
-      subnet = "10.0.3.0/24"
-      az     = "us-east-1c"
-    }
-  ]
-  vpc_id                  = module.vpc.vpc_id
-  map_public_ip_on_launch = true
-}
-
-# Private Subnets
-module "private_subnets" {
-  source = "./modules/vpc/subnets"
-  name   = "private-subnet"
-  subnets = [
-    {
-      subnet = "10.0.6.0/24"
-      az     = "us-east-1a"
-    },
-    {
-      subnet = "10.0.5.0/24"
-      az     = "us-east-1b"
-    },
-    {
-      subnet = "10.0.4.0/24"
-      az     = "us-east-1c"
-    }
-  ]
-  vpc_id                  = module.vpc.vpc_id
-  map_public_ip_on_launch = false
-}
-
-# Public Route Table
-module "public_rt" {
-  source  = "./modules/vpc/route_tables"
-  name    = "public-route-table"
-  subnets = module.public_subnets.subnets[*]
-  routes = [
-    {
-      cidr_block     = "0.0.0.0/0"
-      nat_gateway_id = ""
-      gateway_id     = module.vpc.igw_id
-    }
-  ]
-  vpc_id = module.vpc.vpc_id
-}
-
-# Private Route Table
-module "private_rt" {
-  source  = "./modules/vpc/route_tables"
-  name    = "private-route-table"
-  subnets = module.private_subnets.subnets[*]
-  routes  = []
-  vpc_id  = module.vpc.vpc_id
-}
-
-# Lambda Function Code Bucket
+# -----------------------------------------------------------------------------------------
+# Lambda function configuration
+# -----------------------------------------------------------------------------------------
 module "lambda_function_code_bucket" {
   source      = "./modules/s3"
   bucket_name = "lambda-function-code-${random_id.random.hex}"
@@ -208,7 +170,6 @@ module "lambda_function_code_bucket" {
   force_destroy = true
 }
 
-# Lambda IAM  Role
 module "lambda_function_iam_role" {
   source             = "./modules/iam"
   role_name          = "lambda-function-iam-role"
@@ -248,7 +209,6 @@ module "lambda_function_iam_role" {
     EOF
 }
 
-# Lambda function to process media files
 module "lambda_function" {
   source        = "./modules/lambda"
   function_name = "lambda-function"
@@ -263,7 +223,7 @@ module "lambda_function" {
 }
 
 # -----------------------------------------------------------------------------------------
-# ECR Configuration
+# ECS & ECR configuration
 # -----------------------------------------------------------------------------------------
 module "ecr_container_registry" {
   source               = "./modules/ecr"
@@ -274,20 +234,15 @@ module "ecr_container_registry" {
   name                 = "nodeapp"
 }
 
-# -----------------------------------------------------------------------------------------
-# Load Balancer Configuration
-# -----------------------------------------------------------------------------------------
-
-# ECS Load Balancer
 module "ecs_lb" {
   source                     = "./modules/load-balancer"
   lb_name                    = "ecs-lb"
   lb_is_internal             = false
   lb_ip_address_type         = "ipv4"
   load_balancer_type         = "application"
-  enable_deletion_protection = true
-  security_groups            = [module.ecs_lb_sg.id]
-  subnets                    = module.public_subnets.subnets[*].id
+  enable_deletion_protection = false
+  security_groups            = [aws_security_group.ecs_lb_sg.id]
+  subnets                    = module.vpc.public_subnets
   target_groups = [
     {
       target_group_name                = "ecs-lb-tg"
@@ -322,35 +277,12 @@ module "ecs_lb" {
   ]
 }
 
-# -----------------------------------------------------------------------------------------
-# ECS Configuration
-# -----------------------------------------------------------------------------------------
-
 resource "aws_ecs_cluster" "ecs_cluster" {
   name = "ecs_cluster"
   setting {
     name  = "containerInsights"
     value = "enabled"
   }
-}
-
-# Cloudwatch log groups for ecs service logs
-module "ecs_log_group" {
-  source            = "./modules/cloudwatch/cloudwatch-log-group"
-  log_group_name    = "/ecs/nodeapp"
-  retention_in_days = 30
-}
-
-module "lambda_log_group" {
-  source            = "./modules/cloudwatch/cloudwatch-log-group"
-  log_group_name    = "/lambda/nodeapp"
-  retention_in_days = 30
-}
-
-module "ec2_log_group" {
-  source            = "./modules/cloudwatch/cloudwatch-log-group"
-  log_group_name    = "/ec2/nodeapp"
-  retention_in_days = 30
 }
 
 data "aws_iam_policy_document" "s3_put_object_policy_document" {
@@ -403,7 +335,6 @@ resource "aws_iam_role_policy_attachment" "s3_put_object_role_policy_attachment"
   policy_arn = aws_iam_policy.s3_put_policy.arn
 }
 
-# Frontend ECS Configuration
 module "ecs" {
   source                                   = "./modules/ecs"
   task_definition_family                   = "nodeapp"
@@ -481,16 +412,18 @@ module "ecs" {
     target_group_arn = module.ecs_lb.target_groups[0].arn
   }]
 
-  security_groups = [module.ecs_sg.id]
+  security_groups = [aws_security_group.ecs_sg.id]
   subnets = [
-    module.public_subnets.subnets[0].id,
-    module.public_subnets.subnets[1].id,
-    module.public_subnets.subnets[2].id
+    module.vpc.public_subnets[0],
+    module.vpc.public_subnets[1],
+    module.vpc.public_subnets[2]
   ]
   assign_public_ip = true
 }
 
-# EC2 IAM Instance Profile
+# -----------------------------------------------------------------------------------------
+# EC2 & Autoscaling groups configuration
+# -----------------------------------------------------------------------------------------
 data "aws_iam_policy_document" "instance_profile_assume_role" {
   statement {
     effect = "Allow"
@@ -541,7 +474,7 @@ module "asg_launch_template" {
   network_interfaces = [
     {
       associate_public_ip_address = true
-      security_groups             = [module.asg_sg.id]
+      security_groups             = [aws_security_group.asg_sg.id]
     }
   ]
   user_data = base64encode(templatefile("${path.module}/scripts/asg_user_data.sh", {}))
@@ -557,7 +490,7 @@ module "asg" {
   health_check_type         = "ELB"
   force_delete              = true
   target_group_arns         = [module.asg_lb.target_groups[0].arn]
-  vpc_zone_identifier       = module.public_subnets.subnets[*].id
+  vpc_zone_identifier       = module.vpc.public_subnets
   launch_template_id        = module.asg_launch_template.id
   launch_template_version   = "$Latest"
 }
@@ -568,9 +501,9 @@ module "asg_lb" {
   lb_is_internal             = false
   lb_ip_address_type         = "ipv4"
   load_balancer_type         = "application"
-  enable_deletion_protection = true
-  security_groups            = [module.asg_lb_sg.id]
-  subnets                    = module.public_subnets.subnets[*].id
+  enable_deletion_protection = false
+  security_groups            = [aws_security_group.asg_lb_sg.id]
+  subnets                    = module.vpc.public_subnets
   target_groups = [
     {
       target_group_name                = "nodeapp"
@@ -604,7 +537,9 @@ module "asg_lb" {
   ]
 }
 
-# Kinesis module
+# -----------------------------------------------------------------------------------------
+# Kinesis & Firehose configuration
+# -----------------------------------------------------------------------------------------
 module "kinesis_stream" {
   source           = "./modules/kinesis"
   name             = "kinesis-stream"
@@ -616,7 +551,29 @@ module "kinesis_stream" {
   stream_mode = "ON_DEMAND"
 }
 
-# Firehose Role
+# -----------------------------------------------------------------------------------------
+# Opensearch configuration
+# -----------------------------------------------------------------------------------------
+module "opensearch" {
+  source                          = "./modules/opensearch"
+  domain_name                     = "opensearchdestination"
+  engine_version                  = "OpenSearch_2.17"
+  instance_type                   = "t3.small.search"
+  instance_count                  = 1
+  ebs_enabled                     = true
+  volume_size                     = 10
+  encrypt_at_rest_enabled         = true
+  security_options_enabled        = true
+  anonymous_auth_enabled          = true
+  internal_user_database_enabled  = true
+  master_user_name                = tostring(data.vault_generic_secret.opensearch.data["username"])
+  master_user_password            = tostring(data.vault_generic_secret.opensearch.data["password"])
+  node_to_node_encryption_enabled = true
+}
+
+# -----------------------------------------------------------------------------------------
+# Firehose delivery stream configuration
+# -----------------------------------------------------------------------------------------
 module "firehose_role" {
   source             = "./modules/iam"
   role_name          = "firehose_role"
@@ -668,7 +625,7 @@ module "firehose_role" {
               "s3:PutObject"
           ],
           "Resource": [
-            "${aws_s3_bucket.firehose_backup.arn},
+            "${aws_s3_bucket.firehose_backup.arn}",
             "${aws_s3_bucket.firehose_backup.arn}/*"
           ]
         },
@@ -686,24 +643,6 @@ module "firehose_role" {
       ]
     }
     EOF
-}
-
-# Opensearch module
-module "opensearch" {
-  source                          = "./modules/opensearch"
-  domain_name                     = "opensearchdestination"
-  engine_version                  = "OpenSearch_2.17"
-  instance_type                   = "t3.small.search"
-  instance_count                  = 1
-  ebs_enabled                     = true
-  volume_size                     = 10
-  encrypt_at_rest_enabled         = true
-  security_options_enabled        = true
-  anonymous_auth_enabled          = true
-  internal_user_database_enabled  = true
-  master_user_name                = tostring(data.vault_generic_secret.opensearch.data["username"])
-  master_user_password            = tostring(data.vault_generic_secret.opensearch.data["password"])
-  node_to_node_encryption_enabled = true
 }
 
 resource "aws_s3_bucket" "firehose_backup" {
@@ -737,6 +676,39 @@ resource "aws_kinesis_firehose_delivery_stream" "opensearch_stream" {
     s3_backup_mode = "AllDocuments"
   }
   depends_on = [module.opensearch]
+}
+
+# -----------------------------------------------------------------------------------------
+# Cloudwatch logs subscription filter
+# -----------------------------------------------------------------------------------------
+resource "aws_iam_role" "cloudwatch_to_kinesis" {
+  name = "cloudwatch-to-kinesis-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "logs.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "cloudwatch_to_kinesis_policy" {
+  role = aws_iam_role.cloudwatch_to_kinesis.name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "kinesis:PutRecord",
+        "kinesis:PutRecords"
+      ]
+      Resource = "${module.kinesis_stream.arn}"
+    }]
+  })
 }
 
 resource "aws_cloudwatch_log_subscription_filter" "lambda_log_subscription" {
