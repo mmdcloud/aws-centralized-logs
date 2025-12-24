@@ -1,4 +1,4 @@
-# CarsHub Infrastructure
+# Centralized Logs
 
 A production-grade, highly available AWS infrastructure for the CarsHub application, built with Terraform and following AWS best practices for scalability, security, and observability.
 
